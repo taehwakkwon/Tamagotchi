@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.52.0",
+    "openai>=1.60.0",
     "chromadb>=1.0.0",
     "typer>=0.15.0",
     "rich>=13.0.0",

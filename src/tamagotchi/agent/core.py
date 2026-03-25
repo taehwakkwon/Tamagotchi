@@ -1,11 +1,10 @@
-"""Agent core — Claude API conversation loop with tool use and streaming."""
+"""Agent core — conversation loop with tool use, supports Anthropic & OpenAI endpoints."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-import anthropic
 from rich.console import Console
 
 from tamagotchi.agent.prompts import build_system_prompt
@@ -17,13 +16,12 @@ from tamagotchi.config import (
     MAX_HISTORY_MESSAGES,
     MAX_TOKENS,
     MAX_TOOL_ROUNDS,
-    get_chat_model,
-    get_model_display_name,
 )
 from tamagotchi.growth.personality import PersonalityManager
 from tamagotchi.growth.state import GrowthManager
 from tamagotchi.learning.extractor import extract_preferences
 from tamagotchi.learning.patterns import PatternAnalyzer
+from tamagotchi.llm import LLMClient, create_llm_client
 from tamagotchi.memory.episodic import EpisodicMemory
 from tamagotchi.memory.profile import ProfileManager, UserProfile
 from tamagotchi.memory.semantic import SemanticMemory
@@ -35,19 +33,26 @@ console = Console()
 class TamagotchiAgent:
     """Main agent that orchestrates conversation, learning, and growth."""
 
-    def __init__(self, store: MemoryStore, model: str | None = None):
+    def __init__(
+        self,
+        store: MemoryStore,
+        model: str | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ):
         self.store = store
-        self.model = get_chat_model(model)
-        self.client = anthropic.Anthropic()
+        self.llm = create_llm_client(
+            provider=provider, model=model, base_url=base_url, api_key=api_key,
+        )
         self.profile_mgr = ProfileManager(store)
         self.growth_mgr = GrowthManager(store)
         self.personality_mgr = PersonalityManager(store)
         self.semantic = SemanticMemory()
         self.episodic = EpisodicMemory(store, self.semantic)
         self.patterns = PatternAnalyzer(store)
-        self.tool_executor = ToolExecutor(store, self.client, self.semantic)
+        self.tool_executor = ToolExecutor(store, client=None, semantic=self.semantic)  # type: ignore
         self.messages: list[dict[str, Any]] = []
-        # Keep full history for post-session learning (not trimmed)
         self._full_messages: list[dict[str, Any]] = []
 
     def chat_loop(self) -> None:
@@ -55,8 +60,7 @@ class TamagotchiAgent:
         profile = self.profile_mgr.load()
 
         console.print()
-        model_name = get_model_display_name(self.model)
-        console.print(f"[dim]모델: {model_name}[/dim]")
+        console.print(f"[dim]모델: {self.llm.model} ({type(self.llm).__name__})[/dim]")
         self._show_greeting(profile)
         console.print("[dim]'quit' 또는 'exit'로 대화를 종료합니다.[/dim]\n")
 
@@ -92,9 +96,7 @@ class TamagotchiAgent:
                     personality=personality,
                 )
 
-                # Trim history before sending to API
                 trimmed = _trim_messages(self.messages)
-
                 assistant_text = self._run_with_tools(system_prompt, trimmed)
                 console.print()
 
@@ -104,60 +106,54 @@ class TamagotchiAgent:
         self._on_session_end(profile)
 
     def _run_with_tools(self, system_prompt: str, messages: list[dict[str, Any]]) -> str:
-        """Run Claude with tool use — handles multi-turn tool calls."""
+        """Run LLM with tool use — handles multi-turn tool calls."""
         final_text = ""
 
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=MAX_TOKENS,
-                system=system_prompt,
+            response = self.llm.chat(
+                system_prompt=system_prompt,
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
+                max_tokens=MAX_TOKENS,
             )
 
-            # Process response content blocks
-            assistant_content = response.content
-            text_parts = []
-            tool_uses = []
+            # Display text
+            if response.text:
+                console.print(f"[bold green]다마고치> [/bold green]{response.text}")
+                final_text += response.text
 
-            for block in assistant_content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    tool_uses.append(block)
-
-            # Display text to user
-            if text_parts:
-                text = "".join(text_parts)
-                console.print(f"[bold green]다마고치> [/bold green]{text}")
-                final_text += text
-
-            # Append to both message lists
-            assistant_msg = {"role": "assistant", "content": assistant_content}
+            # Build assistant message in the right format for the provider
+            assistant_msg = self.llm.build_assistant_message(response)
             messages.append(assistant_msg)
             self.messages.append(assistant_msg)
             self._full_messages.append(assistant_msg)
 
             # If no tool calls, we're done
-            if not tool_uses:
+            if not response.tool_calls:
                 break
 
-            # Execute tools and add results
-            tool_results = []
-            for tool_use in tool_uses:
-                console.print(f"[dim]  [{tool_use.name}] 실행 중...[/dim]")
-                result = self.tool_executor.execute(tool_use.name, tool_use.input)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use.id,
-                    "content": result,
-                })
+            # Execute tools
+            results = []
+            for tc in response.tool_calls:
+                console.print(f"[dim]  [{tc.name}] 실행 중...[/dim]")
+                result = self.tool_executor.execute(tc.name, tc.input)
+                results.append(result)
 
-            tool_msg = {"role": "user", "content": tool_results}
-            messages.append(tool_msg)
-            self.messages.append(tool_msg)
-            self._full_messages.append(tool_msg)
+            # Build tool result messages in the right format
+            tool_result_msgs = self.llm.build_tool_result_messages(response.tool_calls, results)
+
+            if isinstance(self.llm, _get_openai_class()):
+                # OpenAI: each tool result is a separate message
+                for trm in tool_result_msgs:
+                    messages.append(trm)
+                    self.messages.append(trm)
+                    self._full_messages.append(trm)
+            else:
+                # Anthropic: tool results are wrapped in a user message
+                tool_msg = {"role": "user", "content": tool_result_msgs}
+                messages.append(tool_msg)
+                self.messages.append(tool_msg)
+                self._full_messages.append(tool_msg)
 
         return final_text
 
@@ -178,14 +174,12 @@ class TamagotchiAgent:
             return
 
         console.print("\n[dim]대화 내용을 학습하는 중...[/dim]")
-
-        # Use full (untrimmed) history for learning
         text_messages = _extract_text_messages(self._full_messages)
 
-        # Extract preferences from conversation
+        # Extract preferences
         extracted: list[dict] = []
         try:
-            extracted = extract_preferences(self.client, text_messages)
+            extracted = extract_preferences(self.llm, text_messages)
             for pref in extracted:
                 self.profile_mgr.add_preference(
                     category=pref["category"],
@@ -198,7 +192,7 @@ class TamagotchiAgent:
         except Exception:
             new_prefs = 0
 
-        # Save episode (SQLite + ChromaDB vector store)
+        # Save episode
         try:
             summary = self._summarize_conversation()
             self.episodic.save(
@@ -209,7 +203,7 @@ class TamagotchiAgent:
         except Exception:
             pass
 
-        # Update personality based on conversation signals
+        # Update personality
         try:
             signals = self.personality_mgr.detect_signals(text_messages)
             if signals:
@@ -229,12 +223,10 @@ class TamagotchiAgent:
         if leveled_up:
             state = self.growth_mgr.get_state()
             from tamagotchi.growth.state import LEVELS
-
             level_info = LEVELS[state["level"]]
             console.print(f"\n[bold magenta]레벨 업! Lv.{state['level']} {level_info['name']}으로 성장했어요![/bold magenta]")
 
     def _summarize_conversation(self) -> str:
-        """Generate a brief summary of the conversation."""
         text_messages = _extract_text_messages(self._full_messages)
         user_msgs = [m["content"] for m in text_messages if m["role"] == "user"]
         if len(user_msgs) <= 2:
@@ -242,27 +234,25 @@ class TamagotchiAgent:
         return f"{user_msgs[0][:50]}... ({len(user_msgs)}개 메시지)"
 
 
+def _get_openai_class():
+    """Lazy import to avoid circular dependency."""
+    from tamagotchi.llm import OpenAIClient
+    return OpenAIClient
+
+
 def _trim_messages(
     messages: list[dict[str, Any]],
     max_messages: int = MAX_HISTORY_MESSAGES,
     max_chars: int = MAX_HISTORY_CHARS,
 ) -> list[dict[str, Any]]:
-    """Trim conversation history to fit within limits.
-
-    Strategy: keep the first 2 messages (initial context) + most recent messages
-    that fit within the char/count budget. Always preserves message pairs
-    (user + assistant) to avoid breaking conversation flow.
-    """
+    """Trim conversation history to fit within limits."""
     if len(messages) <= max_messages:
         total_chars = sum(_message_chars(m) for m in messages)
         if total_chars <= max_chars:
-            return messages  # No trimming needed
+            return messages
 
-    # Always keep at least the last message (current user input)
-    # Work backwards from the end, accumulating messages
     result: list[dict[str, Any]] = []
     char_count = 0
-
     for msg in reversed(messages):
         msg_chars = _message_chars(msg)
         if len(result) >= max_messages or char_count + msg_chars > max_chars:
@@ -271,16 +261,12 @@ def _trim_messages(
         char_count += msg_chars
 
     result.reverse()
-
-    # Ensure the first message is from user (API requirement)
     if result and result[0]["role"] != "user":
         result = result[1:]
-
-    return result if result else messages[-2:]  # At minimum keep last exchange
+    return result if result else messages[-2:]
 
 
 def _message_chars(msg: dict[str, Any]) -> int:
-    """Estimate character count of a message."""
     content = msg.get("content", "")
     if isinstance(content, str):
         return len(content)
@@ -302,10 +288,12 @@ def _extract_text_messages(messages: list[dict[str, Any]]) -> list[dict[str, str
         role = msg["role"]
         content = msg["content"]
 
+        if role == "tool":
+            continue  # Skip OpenAI-format tool results
+
         if isinstance(content, str):
             text_msgs.append({"role": role, "content": content})
         elif isinstance(content, list):
-            # Assistant messages with content blocks
             texts = []
             for block in content:
                 if hasattr(block, "type") and block.type == "text":

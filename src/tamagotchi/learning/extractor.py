@@ -1,10 +1,9 @@
-"""Extract structured preferences from conversation using Claude API."""
+"""Extract structured preferences from conversation using LLM."""
 
 from __future__ import annotations
 
 import json
-
-import anthropic
+from typing import Any
 
 EXTRACTION_PROMPT = """\
 아래 대화에서 사용자의 선호도, 취향, 습관, 관심사를 추출하세요.
@@ -27,29 +26,39 @@ EXTRACTION_PROMPT = """\
 
 
 def extract_preferences(
-    client: anthropic.Anthropic,
+    client: Any,
     messages: list[dict[str, str]],
 ) -> list[dict]:
-    """Use Claude to extract user preferences from a conversation."""
+    """Extract user preferences from a conversation.
+
+    Args:
+        client: Either an LLMClient instance or an anthropic.Anthropic client (legacy).
+        messages: Conversation messages.
+    """
     conversation_text = "\n".join(
         f"{'사용자' if m['role'] == 'user' else 'AI'}: {m['content']}"
         for m in messages
     )
 
-    from tamagotchi.config import EXTRACTION_MODEL
+    prompt = EXTRACTION_PROMPT.format(conversation=conversation_text)
 
-    response = client.messages.create(
-        model=EXTRACTION_MODEL,
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": EXTRACTION_PROMPT.format(conversation=conversation_text),
-            }
-        ],
-    )
+    # Support both LLMClient and raw Anthropic client
+    from tamagotchi.llm import LLMClient
 
-    text = response.content[0].text.strip()
+    if isinstance(client, LLMClient):
+        text = client.extract(prompt)
+    else:
+        # Legacy: raw anthropic.Anthropic client
+        from tamagotchi.config import EXTRACTION_MODEL
+
+        response = client.messages.create(
+            model=EXTRACTION_MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text
+
+    text = text.strip()
 
     # Parse JSON from response (handle markdown code blocks)
     if text.startswith("```"):

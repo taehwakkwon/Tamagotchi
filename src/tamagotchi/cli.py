@@ -30,7 +30,19 @@ def _get_store() -> MemoryStore:
 def chat(
     model: Optional[str] = typer.Option(
         None, "--model", "-m",
-        help="사용할 모델 (sonnet, haiku, opus). 환경변수 TAMAGOTCHI_MODEL도 가능.",
+        help="사용할 모델. Anthropic: sonnet/haiku/opus. OpenAI: 모델 이름 (예: Qwen/Qwen3-8B)",
+    ),
+    provider: Optional[str] = typer.Option(
+        None, "--provider", "-p",
+        help="LLM 제공자 (anthropic 또는 openai). 환경변수 TAMAGOTCHI_PROVIDER도 가능.",
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url",
+        help="OpenAI-compatible 엔드포인트 URL (예: http://localhost:8000/v1)",
+    ),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key",
+        help="API 키 (self-hosted는 보통 불필요)",
     ),
 ) -> None:
     """다마고치와 대화를 시작합니다."""
@@ -38,7 +50,10 @@ def chat(
 
     store = _get_store()
     try:
-        agent = TamagotchiAgent(store, model=model)
+        agent = TamagotchiAgent(
+            store, model=model, provider=provider,
+            base_url=base_url, api_key=api_key,
+        )
         agent.chat_loop()
     finally:
         store.close()
@@ -50,7 +65,9 @@ def models() -> None:
     from tamagotchi.config import MODELS, get_chat_model
 
     current = get_chat_model()
-    table = Table(title="사용 가능한 모델")
+
+    console.print("[bold]Anthropic 모델:[/bold]")
+    table = Table(show_header=True)
     table.add_column("이름", style="cyan")
     table.add_column("설명", style="white")
     table.add_column("대화당 비용", style="yellow", justify="right")
@@ -61,8 +78,25 @@ def models() -> None:
         table.add_row(key, info["description"], info["cost_per_chat"], marker)
 
     console.print(table)
-    console.print("\n[dim]사용법: tamagotchi chat --model haiku[/dim]")
-    console.print("[dim]또는: export TAMAGOTCHI_MODEL=haiku[/dim]")
+
+    console.print("\n[bold]Self-hosted (OpenAI-compatible):[/bold]")
+    console.print("[dim]vLLM, SGLang, Ollama 등으로 띄운 모델을 사용할 수 있습니다.[/dim]")
+    console.print()
+    console.print("[bold cyan]사용법:[/bold cyan]")
+    console.print("  [dim]# Anthropic[/dim]")
+    console.print("  tamagotchi chat --model haiku")
+    console.print()
+    console.print("  [dim]# Self-hosted (vLLM / SGLang)[/dim]")
+    console.print("  tamagotchi chat --provider openai --base-url http://localhost:8000/v1 --model Qwen/Qwen3-8B")
+    console.print()
+    console.print("  [dim]# Ollama[/dim]")
+    console.print("  tamagotchi chat --provider openai --base-url http://localhost:11434/v1 --model llama3")
+    console.print()
+    console.print("  [dim]# 환경변수로 설정[/dim]")
+    console.print("  export TAMAGOTCHI_PROVIDER=openai")
+    console.print("  export TAMAGOTCHI_BASE_URL=http://localhost:8000/v1")
+    console.print("  export TAMAGOTCHI_MODEL=Qwen/Qwen3-8B")
+    console.print("  tamagotchi chat")
 
 
 @app.command()
