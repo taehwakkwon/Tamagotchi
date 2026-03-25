@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tamagotchi</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --surface: #16213e;
+            --primary: #e94560;
+            --accent: #0f3460;
+            --text: #eee;
+            --dim: #888;
+            --success: #4ade80;
+            --warning: #fbbf24;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+        }
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+            text-align: center;
+        }
+        .sidebar-header h1 { font-size: 1.3em; color: var(--primary); }
+        .tamagotchi-art {
+            font-family: monospace;
+            white-space: pre;
+            font-size: 14px;
+            line-height: 1.3;
+            color: var(--warning);
+            margin: 10px 0;
+        }
+        .stats {
+            padding: 15px 20px;
+            flex: 1;
+            overflow-y: auto;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #222;
+            font-size: 0.9em;
+        }
+        .stat-label { color: var(--dim); }
+        .stat-value { font-weight: 600; }
+        .xp-bar {
+            margin: 10px 0;
+            background: #333;
+            border-radius: 10px;
+            height: 12px;
+            overflow: hidden;
+        }
+        .xp-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--warning));
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .level-badge {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        /* Tabs */
+        .tab-bar {
+            display: flex;
+            border-bottom: 1px solid #333;
+            padding: 0 20px;
+        }
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            color: var(--dim);
+            border-bottom: 2px solid transparent;
+            font-size: 0.9em;
+        }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab:hover { color: var(--text); }
+        /* Main */
+        .main { flex: 1; display: flex; flex-direction: column; }
+        /* Chat */
+        .chat-panel { flex: 1; display: flex; flex-direction: column; }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .message {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 0.95em;
+            line-height: 1.5;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .message.user {
+            align-self: flex-end;
+            background: var(--accent);
+            border-bottom-right-radius: 4px;
+        }
+        .message.assistant {
+            align-self: flex-start;
+            background: var(--surface);
+            border-bottom-left-radius: 4px;
+        }
+        .message.system {
+            align-self: center;
+            background: transparent;
+            color: var(--dim);
+            font-size: 0.85em;
+            padding: 4px;
+        }
+        .input-area {
+            padding: 15px 20px;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 10px;
+        }
+        .input-area input {
+            flex: 1;
+            background: var(--surface);
+            border: 1px solid #444;
+            border-radius: 24px;
+            padding: 12px 20px;
+            color: var(--text);
+            font-size: 0.95em;
+            outline: none;
+        }
+        .input-area input:focus { border-color: var(--primary); }
+        .input-area button {
+            background: var(--primary);
+            border: none;
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            cursor: pointer;
+            color: white;
+            font-size: 1.2em;
+            transition: opacity 0.2s;
+        }
+        .input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .input-area button:hover:not(:disabled) { opacity: 0.85; }
+        /* Profile panel */
+        .profile-panel, .history-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: none;
+        }
+        .pref-card {
+            background: var(--surface);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+        }
+        .pref-card .cat { color: var(--primary); font-size: 0.8em; text-transform: uppercase; }
+        .pref-card .key { font-weight: 600; margin: 4px 0; }
+        .pref-card .value { color: var(--dim); font-size: 0.9em; }
+        .pref-card .conf {
+            display: inline-block;
+            margin-top: 4px;
+            font-size: 0.8em;
+        }
+        .history-item {
+            background: var(--surface);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+        }
+        .history-item .date { color: var(--dim); font-size: 0.8em; }
+        .loading { text-align: center; padding: 20px; color: var(--dim); }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1>Tamagotchi</h1>
+            <div class="tamagotchi-art" id="art"></div>
+            <span class="level-badge" id="levelBadge">Lv.1</span>
+        </div>
+        <div class="stats" id="stats">
+            <div class="xp-bar"><div class="xp-fill" id="xpFill" style="width: 0%"></div></div>
+            <div id="xpLabel" style="text-align:center;font-size:0.8em;color:var(--dim);margin-bottom:10px"></div>
+            <div class="stat-row"><span class="stat-label">XP</span><span class="stat-value" id="xp">0</span></div>
+            <div class="stat-row"><span class="stat-label">총 대화</span><span class="stat-value" id="convos">0</span></div>
+            <div class="stat-row"><span class="stat-label">학습한 선호도</span><span class="stat-value" id="prefs">0</span></div>
+            <div class="stat-row"><span class="stat-label">추천 수락률</span><span class="stat-value" id="accRate">-</span></div>
+        </div>
+    </div>
+    <div class="main">
+        <div class="tab-bar">
+            <div class="tab active" data-tab="chat">대화</div>
+            <div class="tab" data-tab="profile">프로필</div>
+            <div class="tab" data-tab="history">히스토리</div>
+        </div>
+        <div class="chat-panel" id="chatPanel">
+            <div class="messages" id="messages">
+                <div class="message system">다마고치와 대화를 시작하세요!</div>
+            </div>
+            <div class="input-area">
+                <input type="text" id="input" placeholder="메시지를 입력하세요..." autocomplete="off" />
+                <button id="sendBtn" title="전송">&#9654;</button>
+            </div>
+        </div>
+        <div class="profile-panel" id="profilePanel"></div>
+        <div class="history-panel" id="historyPanel"></div>
+    </div>
+
+    <script>
+        const API = '/api';
+        let sessionId = null;
+
+        const ASCII_ART = {
+            1: '   ___\n  /   \\\n | . . |\n  \\ _ /\n   \\_/',
+            2: '   ___\n  / o \\\n | ^.^ |\n  \\_v_/\n   |_|',
+            3: '  \\\\ //\n   (o.o)\n  /(   )\\\n   |   |\n  _/   \\_',
+            4: '  \\\\   //\n   (^.^)\n </(   )\\>\n   || ||\n  _//  \\\\_',
+            5: ' *\\\\   //*\n   (*.*)  \n  /(   )\\\n   || ||\n _///  \\\\\\_ ',
+            6: '  \\\\   //\n   (@.@)\n  /(   )\\\n   || ||\n _///  \\\\\\_ \n  ~MASTER~',
+        };
+
+        // Elements
+        const messagesEl = document.getElementById('messages');
+        const inputEl = document.getElementById('input');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const name = tab.dataset.tab;
+                document.getElementById('chatPanel').style.display = name === 'chat' ? 'flex' : 'none';
+                document.getElementById('profilePanel').style.display = name === 'profile' ? 'block' : 'none';
+                document.getElementById('historyPanel').style.display = name === 'history' ? 'block' : 'none';
+                if (name === 'profile') loadProfile();
+                if (name === 'history') loadHistory();
+            });
+        });
+
+        // Send message
+        async function sendMessage() {
+            const text = inputEl.value.trim();
+            if (!text) return;
+
+            addMessage('user', text);
+            inputEl.value = '';
+            sendBtn.disabled = true;
+
+            try {
+                const res = await fetch(`${API}/chat`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: text, session_id: sessionId}),
+                });
+                const data = await res.json();
+                sessionId = data.session_id;
+                addMessage('assistant', data.reply);
+
+                if (data.xp_gained > 0) {
+                    addMessage('system', `+${data.xp_gained} XP${data.new_preferences > 0 ? ` | 새 선호도 ${data.new_preferences}개` : ''}`);
+                }
+                if (data.leveled_up) {
+                    addMessage('system', '🎉 레벨 업!');
+                }
+                loadStatus();
+            } catch (e) {
+                addMessage('system', '오류가 발생했습니다. 서버를 확인하세요.');
+            }
+            sendBtn.disabled = false;
+        }
+
+        function addMessage(role, text) {
+            const el = document.createElement('div');
+            el.className = `message ${role}`;
+            el.textContent = text;
+            messagesEl.appendChild(el);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+        sendBtn.addEventListener('click', sendMessage);
+
+        // Load status
+        async function loadStatus() {
+            try {
+                const res = await fetch(`${API}/status`);
+                const d = await res.json();
+                document.getElementById('art').textContent = ASCII_ART[d.level] || ASCII_ART[1];
+                document.getElementById('levelBadge').textContent = `Lv.${d.level} ${d.level_name}`;
+                document.getElementById('xp').textContent = d.xp.toLocaleString();
+                document.getElementById('convos').textContent = d.total_conversations.toLocaleString();
+                document.getElementById('prefs').textContent = d.total_preferences.toLocaleString();
+                document.getElementById('accRate').textContent = d.acceptance_rate != null ? `${(d.acceptance_rate * 100).toFixed(0)}%` : '-';
+
+                // XP bar
+                if (d.xp_to_next != null) {
+                    const LEVEL_XP = {1:0,2:100,3:500,4:2000,5:5000,6:10000};
+                    const currMin = LEVEL_XP[d.level] || 0;
+                    const nextMin = LEVEL_XP[d.level + 1] || d.xp;
+                    const pct = Math.min(100, ((d.xp - currMin) / Math.max(1, nextMin - currMin)) * 100);
+                    document.getElementById('xpFill').style.width = `${pct}%`;
+                    document.getElementById('xpLabel').textContent = `다음 레벨까지 ${d.xp_to_next.toLocaleString()} XP`;
+                } else {
+                    document.getElementById('xpFill').style.width = '100%';
+                    document.getElementById('xpLabel').textContent = 'MAX LEVEL';
+                }
+            } catch (e) {}
+        }
+
+        // Load profile
+        async function loadProfile() {
+            const panel = document.getElementById('profilePanel');
+            panel.innerHTML = '<div class="loading">로딩 중...</div>';
+            try {
+                const res = await fetch(`${API}/profile`);
+                const d = await res.json();
+                if (d.preferences.length === 0) {
+                    panel.innerHTML = '<div class="loading">아직 학습된 선호도가 없습니다.</div>';
+                    return;
+                }
+                panel.innerHTML = d.preferences.map(p => `
+                    <div class="pref-card">
+                        <div class="cat">${p.category}</div>
+                        <div class="key">${p.key}</div>
+                        <div class="value">${p.value}</div>
+                        <div class="conf" style="color: ${p.confidence >= 0.7 ? 'var(--success)' : 'var(--warning)'}">
+                            ${'●'.repeat(Math.round(p.confidence * 5))}${'○'.repeat(5 - Math.round(p.confidence * 5))} ${p.source}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                panel.innerHTML = '<div class="loading">서버에 연결할 수 없습니다.</div>';
+            }
+        }
+
+        // Load history
+        async function loadHistory() {
+            const panel = document.getElementById('historyPanel');
+            panel.innerHTML = '<div class="loading">로딩 중...</div>';
+            try {
+                const res = await fetch(`${API}/history`);
+                const d = await res.json();
+                if (d.episodes.length === 0) {
+                    panel.innerHTML = '<div class="loading">대화 기록이 없습니다.</div>';
+                    return;
+                }
+                panel.innerHTML = d.episodes.map(ep => `
+                    <div class="history-item">
+                        <div class="date">${ep.created_at.slice(0, 19)} | ${ep.message_count}개 메시지</div>
+                        <div>${ep.summary}</div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                panel.innerHTML = '<div class="loading">서버에 연결할 수 없습니다.</div>';
+            }
+        }
+
+        // Initial load
+        loadStatus();
+    </script>
+</body>
+</html>
