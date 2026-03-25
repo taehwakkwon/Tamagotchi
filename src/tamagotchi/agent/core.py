@@ -40,8 +40,10 @@ class TamagotchiAgent:
         provider: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        use_tools: bool = True,
     ):
         self.store = store
+        self.use_tools = use_tools
         self.llm = create_llm_client(
             provider=provider, model=model, base_url=base_url, api_key=api_key,
         )
@@ -108,12 +110,13 @@ class TamagotchiAgent:
     def _run_with_tools(self, system_prompt: str, messages: list[dict[str, Any]]) -> str:
         """Run LLM with tool use — handles multi-turn tool calls."""
         final_text = ""
+        tools = TOOL_DEFINITIONS if self.use_tools else None
 
         for _ in range(MAX_TOOL_ROUNDS):
             response = self.llm.chat(
                 system_prompt=system_prompt,
                 messages=messages,
-                tools=TOOL_DEFINITIONS,
+                tools=tools,
                 max_tokens=MAX_TOKENS,
             )
 

@@ -44,6 +44,10 @@ def chat(
         None, "--api-key",
         help="API 키 (self-hosted는 보통 불필요)",
     ),
+    no_tools: bool = typer.Option(
+        False, "--no-tools",
+        help="도구(tool use) 비활성화. 모델이 function calling을 지원하지 않을 때 사용.",
+    ),
 ) -> None:
     """다마고치와 대화를 시작합니다."""
     from tamagotchi.agent.core import TamagotchiAgent
@@ -53,6 +57,7 @@ def chat(
         agent = TamagotchiAgent(
             store, model=model, provider=provider,
             base_url=base_url, api_key=api_key,
+            use_tools=not no_tools,
         )
         agent.chat_loop()
     finally:
