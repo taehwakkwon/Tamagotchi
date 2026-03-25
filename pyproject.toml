@@ -1,0 +1,37 @@
+[project]
+name = "tamagotchi"
+version = "0.1.0"
+description = "A personalizable AI agent that learns your preferences like a Tamagotchi"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.52.0",
+    "chromadb>=1.0.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[project.scripts]
+tamagotchi = "tamagotchi.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tamagotchi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
